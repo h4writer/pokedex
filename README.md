@@ -21,3 +21,8 @@ only this repository and **Contents: Read and write**. Paste it in ⋮ → Edit 
 ## Run locally
 
 Open `index.html` in a browser. Without GitHub Pages it saves to the browser only.
+
+## Updating
+
+When you change `app.js`, `style.css` or `pokemon-data.js`, bump the `?v=` number in `index.html`
+so browsers don't keep using a cached old version.
