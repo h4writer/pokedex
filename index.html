@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3fb8a6">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Pokédex</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="top-row">
+      <h1>Pokédex</h1>
+      <button class="icon-btn" id="menuBtn" aria-label="Menu">⋮</button>
+    </div>
+    <div class="progress">
+      <div class="progress-text"><strong id="ownedCount">0</strong> / <span id="totalCount">0</span> caught</div>
+      <div class="progress-bar"><div id="progressFill"></div></div>
+    </div>
+  </header>
+
+  <div class="controls">
+    <div class="search">
+      <input id="search" type="search" placeholder="Search name or number…" autocomplete="off" enterkeyhint="go">
+    </div>
+    <div class="filters">
+      <div class="chips" role="tablist">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="owned">Have</button>
+        <button class="chip" data-filter="missing">Missing</button>
+      </div>
+      <select id="genSelect" aria-label="Generation">
+        <option value="0">All gens</option>
+      </select>
+    </div>
+  </div>
+
+  <main id="grid" class="grid"></main>
+  <p id="empty" class="empty" hidden>No Pokémon found.</p>
+
+  <button class="fab" id="fab" aria-label="Quick add">+</button>
+
+  <!-- Detail sheet -->
+  <div class="backdrop" id="backdrop" hidden></div>
+  <section class="sheet" id="sheet" hidden aria-modal="true" role="dialog">
+    <div class="sheet-hero" id="sheetHero">
+      <button class="icon-btn close" id="sheetClose" aria-label="Close">✕</button>
+      <img id="sheetImg" alt="">
+    </div>
+    <div class="sheet-body">
+      <div class="sheet-title">
+        <span id="sheetNum" class="num"></span>
+        <h2 id="sheetName"></h2>
+      </div>
+      <div id="sheetTypes" class="types"></div>
+
+      <button class="big-btn" id="toggleOwned"></button>
+
+      <div class="cards">
+        <h3>Cards <span class="muted">(optional)</span></h3>
+        <ul id="cardList"></ul>
+        <form id="cardForm" class="card-form">
+          <input id="cardNumber" placeholder="Card number, e.g. 025/165" autocomplete="off">
+          <input id="cardSet" placeholder="Set (optional)" autocomplete="off" list="setList">
+          <datalist id="setList"></datalist>
+          <button type="submit">Add card</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- Menu -->
+  <section class="menu" id="menu" hidden>
+    <button id="exportBtn">Export backup</button>
+    <label class="file-btn">Import backup<input type="file" id="importFile" accept="application/json,.json" hidden></label>
+    <p class="muted small">Your collection is saved in this browser. Export a backup to move it to another device.</p>
+  </section>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="pokemon-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
