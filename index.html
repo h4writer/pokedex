@@ -18,6 +18,7 @@
     <div class="progress">
       <div class="progress-text"><strong id="ownedCount">0</strong> / <span id="totalCount">0</span> caught</div>
       <div class="progress-bar"><div id="progressFill"></div></div>
+      <button id="syncStatus" class="sync-status" type="button"></button>
     </div>
   </header>
 
@@ -40,7 +41,7 @@
   <main id="grid" class="grid"></main>
   <p id="empty" class="empty" hidden>No Pokémon found.</p>
 
-  <button class="fab" id="fab" aria-label="Quick add">+</button>
+  <button class="fab edit-only" id="fab" aria-label="Quick add">+</button>
 
   <!-- Detail sheet -->
   <div class="backdrop" id="backdrop" hidden></div>
@@ -56,12 +57,12 @@
       </div>
       <div id="sheetTypes" class="types"></div>
 
-      <button class="big-btn" id="toggleOwned"></button>
+      <button class="big-btn edit-only" id="toggleOwned"></button>
 
-      <div class="cards">
-        <h3>Cards <span class="muted">(optional)</span></h3>
+      <div class="cards" id="cardsSection">
+        <h3>Cards <span class="muted edit-only">(optional)</span></h3>
         <ul id="cardList"></ul>
-        <form id="cardForm" class="card-form">
+        <form id="cardForm" class="card-form edit-only">
           <input id="cardNumber" placeholder="Card number, e.g. 025/165" autocomplete="off">
           <input id="cardSet" placeholder="Set (optional)" autocomplete="off" list="setList">
           <datalist id="setList"></datalist>
@@ -73,9 +74,37 @@
 
   <!-- Menu -->
   <section class="menu" id="menu" hidden>
+    <button id="editBtn">Edit mode…</button>
     <button id="exportBtn">Export backup</button>
-    <label class="file-btn">Import backup<input type="file" id="importFile" accept="application/json,.json" hidden></label>
-    <p class="muted small">Your collection is saved in this browser. Export a backup to move it to another device.</p>
+    <label class="file-btn edit-only">Import backup<input type="file" id="importFile" accept="application/json,.json" hidden></label>
+    <p class="muted small" id="menuNote"></p>
+  </section>
+
+  <!-- Edit mode -->
+  <section class="sheet" id="editSheet" hidden aria-modal="true" role="dialog">
+    <div class="sheet-body">
+      <div class="edit-head">
+        <h2>Edit mode</h2>
+        <button class="icon-btn close dark" id="editClose" aria-label="Close">✕</button>
+      </div>
+      <p>Changes are saved to <code>collection.json</code> in your GitHub repository, so everyone who opens the site sees them. To edit from this device you need a GitHub token:</p>
+      <ol class="small">
+        <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a></li>
+        <li>Choose an expiration. Under <b>Repository access</b>, pick <b>Only select repositories</b> and select this repository.</li>
+        <li>Under <b>Permissions → Repository permissions</b>, set <b>Contents</b> to <b>Read and write</b>.</li>
+        <li>Generate the token and paste it below.</li>
+      </ol>
+      <form id="editForm" class="edit-form">
+        <div class="row">
+          <label>Owner<input id="editOwner" required autocomplete="off" autocapitalize="off"></label>
+          <label>Repository<input id="editRepo" required autocomplete="off" autocapitalize="off"></label>
+        </div>
+        <label>Token<input id="editToken" type="password" required autocomplete="off" placeholder="github_pat_…"></label>
+        <p class="error-text" id="editError" hidden></p>
+        <button class="big-btn" id="editSubmit" type="submit">Start editing</button>
+        <p class="muted small">The token is stored only in this browser. Never share it.</p>
+      </form>
+    </div>
   </section>
 
   <div class="toast" id="toast" hidden></div>

@@ -298,3 +298,47 @@ button { font: inherit; cursor: pointer; }
   font-size: 0.95rem;
   white-space: nowrap;
 }
+
+/* Sync status */
+.sync-status {
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: rgba(255,255,255,0.9);
+  font-size: 0.8rem;
+  min-height: 1em;
+}
+.sync-status.error {
+  background: #fff;
+  color: #c0392b;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+/* Read-only (visitors) */
+body.readonly .edit-only { display: none !important; }
+body.readonly .cards.no-cards { display: none; }
+
+/* Edit dialog */
+#editSheet { z-index: 13; }
+#editSheet p, #editSheet ol { line-height: 1.45; }
+#editSheet ol { padding-left: 20px; }
+#editSheet a { color: var(--teal-dark); word-break: break-all; }
+.edit-head { display: flex; align-items: center; justify-content: space-between; }
+.edit-head h2 { margin: 6px 0; }
+.icon-btn.dark { background: #eef1f1; color: var(--text); position: static; }
+.edit-form { display: grid; gap: 10px; margin-top: 12px; }
+.edit-form .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.edit-form label { display: grid; gap: 4px; font-size: 0.85rem; font-weight: 600; }
+.edit-form input {
+  padding: 10px 12px;
+  border: 1px solid #dde4e4;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: normal;
+  min-width: 0;
+}
+.edit-form .big-btn:disabled { opacity: 0.6; }
+.error-text { color: #c0392b; margin: 0; }

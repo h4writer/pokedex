@@ -15,19 +15,176 @@
 
   const byId = new Map(POKEMON.map(([id, name, gen, types]) => [id, { id, name, gen, types: types.map(t => TYPES[t]), key: norm(name) }]));
 
+  const TOKEN_KEY = 'pokedex.token';
+  const REPO_KEY = 'pokedex.repo';
+  const DIRTY_KEY = 'pokedex.dirty';
+  const DATA_PATH = 'collection.json';
+
+  const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+  const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
+
   // ---- State ----
   // collection: { [id]: { added: timestamp, cards: [{ number, set }] } }
-  let collection = load();
+  // The shared copy lives in collection.json in the GitHub repo; localStorage is a cache.
+  let collection = loadLocal();
+  let token = lsGet(TOKEN_KEY);
+  let repo = detectRepo();
   let filter = 'all';
   let gen = 0;
   let query = '';
   let current = null; // id shown in sheet
 
-  function load() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; }
+  function loadLocal() {
+    try { return JSON.parse(lsGet(STORAGE_KEY)) || {}; } catch { return {}; }
   }
-  function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(collection)); } catch { toast('Could not save!'); }
+
+  // On <owner>.github.io/<repo>/ the repo is known from the URL. Elsewhere it can be set in the edit dialog.
+  function detectRepo() {
+    try {
+      const saved = JSON.parse(lsGet(REPO_KEY));
+      if (saved?.owner && saved?.name) return saved;
+    } catch {}
+    const host = location.hostname;
+    if (!host.endsWith('.github.io')) return null;
+    const owner = host.split('.')[0];
+    const seg = location.pathname.split('/').filter(Boolean)[0];
+    return { owner, name: seg && !seg.includes('.') ? seg : host };
+  }
+
+  const canEdit = () => !repo || !!token;
+
+  function save(change) {
+    lsSet(STORAGE_KEY, JSON.stringify(collection));
+    if (repo && token) {
+      lsSet(DIRTY_KEY, '1');
+      if (change) pendingChanges.push(change);
+      schedulePush();
+    }
+  }
+
+  // ---- GitHub sync ----
+  let remoteSha = null;
+  let pendingChanges = [];
+  let pushTimer = null;
+  let pushing = false;
+  let pushAgain = false;
+
+  const contentsUrl = () => `https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${DATA_PATH}`;
+  function ghHeaders() {
+    const h = { Accept: 'application/vnd.github+json' };
+    if (token) h.Authorization = `Bearer ${token}`;
+    return h;
+  }
+  const toBase64 = str => {
+    let bin = '';
+    for (const b of new TextEncoder().encode(str)) bin += String.fromCharCode(b);
+    return btoa(bin);
+  };
+  const fromBase64 = b64 => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), c => c.charCodeAt(0)));
+
+  async function fetchRemote() {
+    const res = await fetch(contentsUrl() + `?t=${Date.now()}`, { headers: ghHeaders(), cache: 'no-store' });
+    if (res.status === 404) return { data: {}, sha: null };
+    if (!res.ok) throw new Error(`GitHub ${res.status}`);
+    const json = await res.json();
+    return { data: JSON.parse(fromBase64(json.content) || '{}'), sha: json.sha };
+  }
+
+  function putRemote(message) {
+    const body = { message, content: toBase64(JSON.stringify(collection, null, 1) + '\n') };
+    if (remoteSha) body.sha = remoteSha;
+    return fetch(contentsUrl(), { method: 'PUT', headers: ghHeaders(), body: JSON.stringify(body) });
+  }
+
+  function schedulePush() {
+    setStatus('Saving…');
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(push, 1500);
+  }
+
+  async function push() {
+    if (pushing) { pushAgain = true; return; }
+    pushing = true;
+    const changes = pendingChanges;
+    pendingChanges = [];
+    const message = changes.length ? changes.join(', ') : 'Update collection';
+    try {
+      let res = await putRemote(message);
+      if (res.status === 409 || res.status === 422) {
+        // File changed elsewhere (another device): get its current version and overwrite with ours.
+        remoteSha = (await fetchRemote()).sha;
+        res = await putRemote(message);
+      }
+      if (res.status === 401 || res.status === 403) throw new Error('auth');
+      if (!res.ok) throw new Error(`GitHub ${res.status}`);
+      remoteSha = (await res.json()).content.sha;
+      if (!pushAgain) lsSet(DIRTY_KEY, null);
+      setStatus('Saved ✓');
+    } catch (e) {
+      pendingChanges = changes.concat(pendingChanges);
+      setStatus(e.message === 'auth' ? 'Token not accepted – check edit mode' : 'Not saved – tap to retry', true);
+    }
+    pushing = false;
+    if (pushAgain) { pushAgain = false; push(); }
+  }
+
+  // Load the shared collection. Unsaved edits from this device are merged in and pushed.
+  async function sync() {
+    if (!repo) { setStatus(''); return; }
+    setStatus(token ? 'Loading…' : '');
+    try {
+      const remote = await fetchRemote();
+      remoteSha = remote.sha;
+      if (token && lsGet(DIRTY_KEY)) {
+        collection = mergeInto(remote.data, loadLocal());
+        save('Sync from device');
+      } else {
+        collection = remote.data;
+        // Visitors don't touch the local cache, so anything added here before edit mode is kept.
+        if (token) lsSet(STORAGE_KEY, JSON.stringify(collection));
+        setStatus(token ? 'Saved ✓' : `Viewing ${repo.owner}'s collection`);
+      }
+      refreshAll();
+    } catch {
+      setStatus('Could not load collection – tap to retry', true);
+    }
+  }
+
+  // Add every Pokémon and card from `incoming` into `target` (nothing is removed).
+  function mergeInto(target, incoming) {
+    for (const [id, entry] of Object.entries(incoming || {})) {
+      if (!byId.has(Number(id))) continue;
+      const mine = target[id] || (target[id] = { added: entry.added || Date.now(), cards: [] });
+      mine.cards ||= [];
+      for (const c of entry.cards || []) {
+        if (!c?.number) continue;
+        if (!mine.cards.some(m => m.number === c.number && (m.set || '') === (c.set || ''))) mine.cards.push(c);
+      }
+    }
+    return target;
+  }
+
+  let statusIsError = false;
+  function setStatus(text, isError = false) {
+    const el = $('#syncStatus');
+    el.textContent = text;
+    el.classList.toggle('error', isError);
+    statusIsError = isError;
+  }
+  $('#syncStatus').addEventListener('click', () => {
+    if (!statusIsError) return;
+    pendingChanges.length ? push() : sync();
+  });
+
+  function applyMode() {
+    document.body.classList.toggle('readonly', !canEdit());
+    $('#editBtn').textContent = token ? 'Stop editing on this device' : 'Edit mode…';
+    $('#editBtn').hidden = !repo && !token;
+    $('#menuNote').textContent = !repo
+      ? 'Saved in this browser only. Put the site on GitHub Pages to share it.'
+      : token
+        ? `Changes are saved to github.com/${repo.owner}/${repo.name} for everyone to see.`
+        : 'Only someone with the edit token can change this collection.';
   }
 
   // ---- Grid ----
@@ -138,7 +295,7 @@
     renderSheet();
     sheet.hidden = false;
     backdrop.hidden = false;
-    $('#toggleOwned').focus();
+    if (canEdit()) $('#toggleOwned').focus();
   }
 
   function renderSheet() {
@@ -163,14 +320,16 @@
       }
       const del = document.createElement('button');
       del.textContent = '✕';
+      del.className = 'edit-only';
       del.setAttribute('aria-label', 'Remove card');
       del.onclick = () => {
         entry.cards.splice(i, 1);
-        commit(current);
+        commit(current, `Remove card ${c.number} from ${byId.get(current).name}`);
       };
       li.append(label, del);
       return li;
     }));
+    $('#cardsSection').classList.toggle('no-cards', !entry?.cards?.length);
   }
 
   function closeSheet() {
@@ -179,8 +338,8 @@
     current = null;
   }
 
-  function commit(id) {
-    save();
+  function commit(id, change) {
+    save(change);
     updateTile(id);
     updateProgress();
     applyFilter();
@@ -189,7 +348,7 @@
 
   function addOwned(id) {
     if (!collection[id]) collection[id] = { added: Date.now(), cards: [] };
-    commit(id);
+    commit(id, `Add ${byId.get(id).name}`);
     const tile = tiles.get(id);
     tile.classList.remove('pop');
     void tile.offsetWidth;
@@ -213,8 +372,8 @@
     if (collection[id]) {
       const removed = collection[id];
       delete collection[id];
-      commit(id);
-      toast(`${p.name} removed`, () => { collection[id] = removed; commit(id); });
+      commit(id, `Remove ${p.name}`);
+      toast(`${p.name} removed`, () => { collection[id] = removed; commit(id, `Add ${p.name}`); });
     } else {
       addOwned(id);
       closeSheet();
@@ -230,7 +389,7 @@
     if (!number) { $('#cardNumber').focus(); return; }
     if (!collection[current]) addOwned(current);
     collection[current].cards.push(set ? { number, set } : { number });
-    commit(current);
+    commit(current, `Add card ${number}${set ? ' (' + set + ')' : ''} to ${byId.get(current).name}`);
     refreshSetList();
     $('#cardNumber').value = '';
     $('#cardNumber').focus();
@@ -251,6 +410,7 @@
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       if (!sheet.hidden) closeSheet();
+      if (!$('#editSheet').hidden) { $('#editSheet').hidden = true; backdrop.hidden = true; }
       $('#menu').hidden = true;
     }
   });
@@ -320,19 +480,9 @@
       const incoming = data.collection || data;
       if (typeof incoming !== 'object' || Array.isArray(incoming)) throw new Error('bad file');
       // Merge: keep everything already here, add new Pokémon and cards from the backup.
-      for (const [id, entry] of Object.entries(incoming)) {
-        if (!byId.has(Number(id))) continue;
-        const mine = collection[id] || (collection[id] = { added: entry.added || Date.now(), cards: [] });
-        for (const c of entry.cards || []) {
-          if (!c?.number) continue;
-          if (!mine.cards.some(m => m.number === c.number && (m.set || '') === (c.set || ''))) mine.cards.push(c);
-        }
-      }
-      save();
-      for (const id of byId.keys()) updateTile(id);
-      updateProgress();
-      applyFilter();
-      refreshSetList();
+      mergeInto(collection, incoming);
+      save('Import backup');
+      refreshAll();
       toast('Backup imported');
     } catch {
       toast('That file is not a valid backup');
@@ -357,10 +507,80 @@
     toastTimer = setTimeout(() => { el.hidden = true; }, undo ? 4000 : 1800);
   }
 
+  // ---- Edit mode (GitHub token) ----
+  const editSheet = $('#editSheet');
+  function closeEdit() {
+    editSheet.hidden = true;
+    backdrop.hidden = sheet.hidden;
+  }
+  $('#editBtn').addEventListener('click', () => {
+    menu.hidden = true;
+    if (token) {
+      token = null;
+      lsSet(TOKEN_KEY, null);
+      applyMode();
+      sync();
+      toast('Edit mode off on this device');
+      return;
+    }
+    $('#editOwner').value = repo?.owner || '';
+    $('#editRepo').value = repo?.name || '';
+    $('#editToken').value = '';
+    $('#editError').hidden = true;
+    editSheet.hidden = false;
+    backdrop.hidden = false;
+    $('#editToken').focus();
+  });
+  $('#editClose').addEventListener('click', closeEdit);
+  backdrop.addEventListener('click', closeEdit);
+
+  $('#editForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const owner = $('#editOwner').value.trim();
+    const name = $('#editRepo').value.trim();
+    const newToken = $('#editToken').value.trim();
+    const err = $('#editError');
+    const btn = $('#editSubmit');
+    err.hidden = true;
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+    try {
+      const res = await fetch(`https://api.github.com/repos/${owner}/${name}`, {
+        headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${newToken}` },
+      });
+      if (res.status === 401) throw new Error('GitHub did not accept this token.');
+      if (res.status === 404) throw new Error(`Repository ${owner}/${name} not found (or the token has no access to it).`);
+      if (!res.ok) throw new Error(`GitHub error ${res.status}.`);
+      if (!(await res.json()).permissions?.push) throw new Error('This token can only read the repository. Give it "Contents: Read and write".');
+      token = newToken;
+      repo = { owner, name };
+      lsSet(TOKEN_KEY, token);
+      lsSet(REPO_KEY, JSON.stringify(repo));
+      // Anything added on this device before edit mode gets merged into the shared collection.
+      if (Object.keys(loadLocal()).length) lsSet(DIRTY_KEY, '1');
+      closeEdit();
+      applyMode();
+      await sync();
+      toast('Edit mode on – changes are saved for everyone');
+    } catch (ex) {
+      err.textContent = ex.message === 'Failed to fetch' ? 'Could not reach GitHub.' : ex.message;
+      err.hidden = false;
+    }
+    btn.disabled = false;
+    btn.textContent = 'Start editing';
+  });
+
+  function refreshAll() {
+    for (const id of byId.keys()) updateTile(id);
+    updateProgress();
+    applyFilter();
+    refreshSetList();
+    if (current) renderSheet();
+  }
+
   // ---- Init ----
   buildGrid();
-  for (const id of byId.keys()) updateTile(id);
-  updateProgress();
-  applyFilter();
-  refreshSetList();
+  applyMode();
+  refreshAll();
+  sync();
 })();
