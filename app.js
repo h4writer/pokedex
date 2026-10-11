@@ -247,6 +247,7 @@
     $('#ownedCount').textContent = owned;
     $('#totalCount').textContent = byId.size;
     $('#progressFill').style.width = (owned / byId.size * 100) + '%';
+    updateRegions();
   }
 
   // Best match for the search box when pressing Enter.
@@ -437,13 +438,42 @@
     applyFilter();
   }));
 
-  const genSelect = $('#genSelect');
-  const maxGen = Math.max(...POKEMON.map(p => p[2]));
-  for (let g = 1; g <= maxGen; g++) genSelect.add(new Option(`Gen ${g}`, g));
-  genSelect.addEventListener('change', () => {
-    gen = Number(genSelect.value);
-    applyFilter();
-  });
+  // ---- Generations (Pokémon GO-style region cards) ----
+  const REGIONS = ['Kanto', 'Johto', 'Hoenn', 'Sinnoh', 'Unova', 'Kalos', 'Alola', 'Galar', 'Paldea'];
+  const regionCards = new Map(); // gen (0 = all) -> card element
+  function buildRegions() {
+    const nav = $('#regions');
+    const maxGen = Math.max(...POKEMON.map(p => p[2]));
+    for (let g = 0; g <= maxGen; g++) {
+      const card = document.createElement('button');
+      card.className = 'region' + (g === 0 ? ' active' : '');
+      card.innerHTML = `<span class="rgen"></span><span class="rname"></span><span class="rcount"></span><span class="rbar"><span></span></span>`;
+      card.querySelector('.rgen').textContent = g ? `Gen ${g}` : 'Everything';
+      card.querySelector('.rname').textContent = g ? (REGIONS[g - 1] || `Gen ${g}`) : 'All';
+      card.addEventListener('click', () => {
+        gen = g;
+        for (const c of regionCards.values()) c.classList.toggle('active', c === card);
+        applyFilter();
+      });
+      nav.appendChild(card);
+      regionCards.set(g, card);
+    }
+  }
+  function updateRegions() {
+    const total = new Map(), owned = new Map();
+    for (const p of byId.values()) {
+      for (const g of [0, p.gen]) {
+        total.set(g, (total.get(g) || 0) + 1);
+        if (collection[p.id]) owned.set(g, (owned.get(g) || 0) + 1);
+      }
+    }
+    for (const [g, card] of regionCards) {
+      const t = total.get(g) || 0, o = owned.get(g) || 0;
+      card.querySelector('.rcount').textContent = `${o} / ${t}`;
+      card.querySelector('.rbar span').style.width = (t ? o / t * 100 : 0) + '%';
+      card.classList.toggle('complete', t > 0 && o === t);
+    }
+  }
 
   $('#fab').addEventListener('click', () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -580,6 +610,7 @@
 
   // ---- Init ----
   buildGrid();
+  buildRegions();
   applyMode();
   refreshAll();
   sync();
